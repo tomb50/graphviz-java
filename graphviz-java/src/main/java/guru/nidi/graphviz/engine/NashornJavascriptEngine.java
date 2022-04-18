@@ -15,6 +15,8 @@
  */
 package guru.nidi.graphviz.engine;
 
+import net.arnx.nashorn.lib.PromiseException;
+
 import javax.script.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,7 +24,7 @@ import java.util.regex.Pattern;
 import static guru.nidi.graphviz.engine.GraphvizLoader.classLoader;
 
 class NashornJavascriptEngine extends AbstractJavascriptEngine {
-    private static final ScriptEngine ENGINE = new ScriptEngineManager(classLoader()).getEngineByExtension("js");
+    private static final ScriptEngine ENGINE = scriptEngine();
     private static final Pattern JAVA_1_8_PATTERN = Pattern.compile("1.8.0_(\\d+).*");
     private static final Pattern JAVA_MAJOR_PATTERN = Pattern.compile("(\\d+).*");
     private final ScriptContext context = new SimpleScriptContext();
@@ -57,6 +59,29 @@ class NashornJavascriptEngine extends AbstractJavascriptEngine {
             ENGINE.eval(js, context);
         } catch (ScriptException e) {
             throw new GraphvizException("Problem executing javascript", e);
+        }
+    }
+
+    /**
+     * The Nashorn script doesn't really honor the provided appClassLoader that is provided
+     * to the factory. It instead uses the ContextClassLoader on instantiation - see getAppClassLoader at
+     * {@link jdk.nashorn.api.scripting.NashornScriptEngineFactory}
+     *
+     * There are cases where the contextClassLoader for the currentThread does not contain the classes needed
+     * e.g it points to a parent class loader whist Graphviz has been loaded as part of a plugin/child
+     *
+     * In this case we are forced to swap the CCL during instantiation to the classloader that loaded PromiseException
+     *
+     */
+    private static ScriptEngine scriptEngine(){
+        ClassLoader backup = Thread.currentThread().getContextClassLoader();
+        try{
+            ClassLoader appClassLoader = PromiseException.class.getClassLoader();
+            Thread.currentThread().setContextClassLoader(appClassLoader);
+            return new ScriptEngineManager(appClassLoader).getEngineByExtension("js");
+        }
+        finally {
+            Thread.currentThread().setContextClassLoader(backup);
         }
     }
 }
